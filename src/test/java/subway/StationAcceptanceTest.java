@@ -1,6 +1,9 @@
 package subway;
 
 import io.restassured.RestAssured;
+import io.restassured.response.ExtractableResponse;
+import io.restassured.response.Response;
+import org.apache.http.HttpHeaders;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -23,6 +26,7 @@ public class StationAcceptanceTest {
     @DisplayName("지하철역을 생성한다.")
     @Test
     void createStation() {
+
         // given
         String gasan = "가산디지털단지역";
 
@@ -30,7 +34,7 @@ public class StationAcceptanceTest {
         createStationRequest(gasan);
 
         // then
-        assertThat(requestListAndExtractStationInfo("name")).containsAnyOf(gasan);
+        assertThat(findStationBy("name")).containsAnyOf(gasan);
     }
 
     /**
@@ -49,11 +53,10 @@ public class StationAcceptanceTest {
         createStationRequest(guro);
 
         // when
-        List<String> stationNames = requestListAndExtractStationInfo("name");
+        List<String> stationNames = findStationBy("name");
 
         // then
-        assertThat(stationNames).containsAnyOf(gasan);
-        assertThat(stationNames).containsAnyOf(guro);
+        assertThat(stationNames).containsAnyOf(gasan, guro);
     }
 
     /**
@@ -61,24 +64,23 @@ public class StationAcceptanceTest {
      * When 그 지하철역을 삭제하면
      * Then 그 지하철역 목록 조회 시 생성한 역을 찾을 수 없다
      */
-    // TODO: 지하철역 제거 인수 테스트 메서드 생성
     @Test
     @DisplayName("지하철역이 생성되고, 삭제된다.")
     void deleteStation() {
         //given
         String gasan = "가산디지털단지역";
 
-        createStationRequest(gasan);
+        ExtractableResponse<Response> createResponse = createStationRequest(gasan);
 
         // when
         RestAssured
                 .when()
-                .delete("/stations/" + 1)
-                    .then()
-                .statusCode(HttpStatus.NO_CONTENT.value());
+                    .delete("/stations/" + getCreatedLocationId(createResponse))
+                .then().log().all()
+                    .statusCode(HttpStatus.NO_CONTENT.value());
 
         // then
-        assertThat(requestListAndExtractStationInfo("name")).hasSize(0);
+        assertThat(findStationBy("name")).hasSize(0);
 
     }
 
@@ -87,17 +89,29 @@ public class StationAcceptanceTest {
      *
      * @param stationName 지하철역 이름
      */
-    private static void createStationRequest(String stationName) {
-        RestAssured
-                .given()
-                    .body(new StationRequest(stationName))
-                    .contentType(MediaType.APPLICATION_JSON_VALUE)
-                .when()
-                    .post("/stations")
-                .then()
-                    .statusCode(HttpStatus.CREATED.value());
+    private ExtractableResponse<Response> createStationRequest(String stationName) {
+        return RestAssured
+                    .given()
+                        .body(new StationRequest(stationName))
+                        .contentType(MediaType.APPLICATION_JSON_VALUE)
+                    .when()
+                        .post("/stations")
+                    .then()
+                        .statusCode(HttpStatus.CREATED.value())
+                    .extract();
     }
 
+    /**
+     * 주어진 응답값으로부터 추출된 Location 속성에서 ID를 반환
+     *
+     * @param createResponse 응답값
+     * @return 추출된 Location 속성의 ID
+     */
+    private int getCreatedLocationId(ExtractableResponse<Response> createResponse) {
+        return Integer
+                .parseInt(createResponse.header(HttpHeaders.LOCATION)
+                .substring(createResponse.header(HttpHeaders.LOCATION).lastIndexOf('/') + 1));
+    }
 
     /**
      * 지하철역 목록을 요청하고, 주어진 추출 대상 이름에 해당하는 값을 추출 후 리스트 반환
@@ -105,7 +119,7 @@ public class StationAcceptanceTest {
      * @param extractionTargetName 추출 대상 이름
      * @return 추출된 값들의 리스트
      */
-    private static List<String> requestListAndExtractStationInfo(String extractionTargetName) {
+    private List<String> findStationBy(String extractionTargetName) {
         return RestAssured.given()
                 .when()
                     .get("/stations")
